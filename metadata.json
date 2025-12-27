@@ -1,0 +1,5 @@
+{
+  "name": "SchemaWeaver AI",
+  "description": "Visualize SQL schemas instantly with interactive force-directed graphs and analyze relationships using Gemini AI.",
+  "requestFramePermissions": []
+}

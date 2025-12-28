@@ -12,8 +12,8 @@ interface ErdDiagramProps {
 interface SimNode extends d3.SimulationNodeDatum {
   id: string;
   table: Table;
-  width?: number;
-  height?: number;
+  width: number;
+  height: number;
 }
 
 interface SimLink extends d3.SimulationLinkDatum<SimNode> {
@@ -44,10 +44,10 @@ export const ErdDiagram: React.FC<ErdDiagramProps> = ({ data, onNodeClick }) => 
     svg.append("defs").append("marker")
       .attr("id", "arrowhead")
       .attr("viewBox", "0 -5 10 10")
-      .attr("refX", 25) // Offset to not overlap node
+      .attr("refX", 9) // Point of the arrow
       .attr("refY", 0)
-      .attr("markerWidth", 8)
-      .attr("markerHeight", 8)
+      .attr("markerWidth", 6)
+      .attr("markerHeight", 6)
       .attr("orient", "auto")
       .append("path")
       .attr("d", "M0,-5L10,0L0,5")
@@ -66,26 +66,40 @@ export const ErdDiagram: React.FC<ErdDiagramProps> = ({ data, onNodeClick }) => 
     svg.call(zoom);
 
     // Prepare Nodes and Links
-    const nodes: SimNode[] = data.tables.map(t => ({ id: t.id, table: t }));
+    const nodes: SimNode[] = data.tables.map(t => ({ 
+        id: t.id, 
+        table: t,
+        width: 150,
+        height: 65
+    }));
     // Create a deep copy of links for D3 to mutate
     const links: SimLink[] = data.relationships.map(r => ({ ...r }));
 
     // Force Simulation
     const simulation = d3.forceSimulation(nodes)
-      .force("link", d3.forceLink(links).id((d: any) => d.id).distance(150))
-      .force("charge", d3.forceManyBody().strength(-800))
+      .force("link", d3.forceLink(links).id((d: any) => d.id).distance(220)) // Increased for label room
+      .force("charge", d3.forceManyBody().strength(-1200)) // Stronger repelling
       .force("center", d3.forceCenter(width / 2, height / 2))
-      .force("collide", d3.forceCollide().radius(80).iterations(2));
+      .force("collide", d3.forceCollide().radius(120).iterations(3)); // Stronger collision circular approximation
 
-    // Render Links
+    // Render Links (Groups)
     const link = g.append("g")
-      .selectAll("line")
+      .selectAll("g")
       .data(links)
-      .join("line")
+      .join("g");
+
+    const linkLine = link.append("line")
       .attr("stroke", "#475569")
       .attr("stroke-opacity", 0.6)
       .attr("stroke-width", 1.5)
       .attr("marker-end", "url(#arrowhead)");
+
+    const linkLabel = link.append("text")
+      .attr("text-anchor", "middle")
+      .attr("fill", "#94a3b8")
+      .attr("font-size", "9px")
+      .attr("dy", -5)
+      .text(d => (d as any).label || "");
 
     // Render Nodes (Groups)
     const node = g.append("g")
@@ -100,15 +114,16 @@ export const ErdDiagram: React.FC<ErdDiagramProps> = ({ data, onNodeClick }) => 
 
     // Node Rectangle
     node.append("rect")
-      .attr("width", 140)
-      .attr("height", 60)
-      .attr("x", -70)
-      .attr("y", -30)
-      .attr("rx", 6)
-      .attr("fill", "#1e293b")
+      .attr("width", d => d.width)
+      .attr("height", d => d.height)
+      .attr("x", d => -d.width / 2)
+      .attr("y", d => -d.height / 2)
+      .attr("rx", 10)
+      .attr("fill", "#0f172a")
       .attr("stroke", "#38bdf8")
-      .attr("stroke-width", 1)
-      .attr("class", "transition-colors duration-200 hover:fill-slate-800 shadow-lg");
+      .attr("stroke-width", 2)
+      .style("filter", "drop-shadow(0 0 8px rgba(56, 189, 248, 0.2))")
+      .attr("class", "transition-all duration-300 hover:fill-slate-900 shadow-2xl");
 
     // Table Name
     node.append("text")
@@ -137,11 +152,52 @@ export const ErdDiagram: React.FC<ErdDiagramProps> = ({ data, onNodeClick }) => 
 
     // Simulation Tick
     simulation.on("tick", () => {
-      link
-        .attr("x1", (d: any) => d.source.x)
-        .attr("y1", (d: any) => d.source.y)
-        .attr("x2", (d: any) => d.target.x)
-        .attr("y2", (d: any) => d.target.y);
+      linkLine.each(function(d: any) {
+        const sourceNode = d.source as SimNode;
+        const targetNode = d.target as SimNode;
+        
+        // Calculate the intersection of the link with the source and target rectangles
+        const dx = (targetNode as any).x - (sourceNode as any).x;
+        const dy = (targetNode as any).y - (sourceNode as any).y;
+        
+        const getIntersection = (node: SimNode, directionX: number, directionY: number) => {
+          const absDx = Math.abs(directionX);
+          const absDy = Math.abs(directionY);
+          
+          if (absDx === 0 && absDy === 0) return { x: (node as any).x, y: (node as any).y };
+          
+          const scaleW = (node.width / 2) / absDx;
+          const scaleH = (node.height / 2) / absDy;
+          const scale = Math.min(scaleW, scaleH);
+          
+          return {
+            x: (node as any).x + directionX * scale,
+            y: (node as any).y + directionY * scale
+          };
+        };
+        
+        const start = getIntersection(sourceNode, dx, dy);
+        const end = getIntersection(targetNode, -dx, -dy);
+        
+        d3.select(this)
+          .attr("x1", start.x)
+          .attr("y1", start.y)
+          .attr("x2", end.x)
+          .attr("y2", end.y);
+      });
+
+      linkLabel
+        .attr("x", (d: any) => ((d.source as any).x + (d.target as any).x) / 2)
+        .attr("y", (d: any) => ((d.source as any).y + (d.target as any).y) / 2)
+        .attr("transform", (d: any) => {
+          const s = d.source as any;
+          const t = d.target as any;
+          const dx = t.x - s.x;
+          const dy = t.y - s.y;
+          const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+          const rotation = (angle > 90 || angle < -90) ? angle + 180 : angle;
+          return `rotate(${rotation}, ${(s.x + t.x) / 2}, ${(s.y + t.y) / 2})`;
+        });
 
       node
         .attr("transform", (d: any) => `translate(${d.x},${d.y})`);
